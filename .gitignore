@@ -1,0 +1,33 @@
+# Dataset — do not push (too large)
+data/
+*.jpg
+*.jpeg
+*.png
+*.zip
+
+# Trained model checkpoints — too large for git
+checkpoints/
+*.pt
+*.pth
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+env/
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# HuggingFace model cache
+*.cache
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db

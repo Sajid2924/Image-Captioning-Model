@@ -26,11 +26,7 @@ from transformers import GPT2LMHeadModel   # only used for weight loading
 from config import cfg
 
 
-# ─────────────────────────────────────────────────────────────
-#  1. Causal Self-Attention
-#     "Causal" = each token can only attend to past tokens
-#     This is enforced by the triangular mask
-# ─────────────────────────────────────────────────────────────
+#  1. Causal Self-Attention, "Causal" = each token can only attend to past tokens
 
 class CausalSelfAttention(nn.Module):
     """

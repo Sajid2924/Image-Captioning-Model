@@ -13,11 +13,12 @@
 
 import torch
 import torch.nn as nn
-import torchvision.models as models
-import torchvision.transforms as transforms
+import torchvision.models as models    # torchvision.models has pretrained CNNs like ResNet
+import torchvision.transforms as transforms    # torchvision.transforms has image processing tools like resize, normalize, convert to tensor.
 from config import cfg
 
 
+# Creates a new neural network class called ImageEncoder
 class ImageEncoder(nn.Module):
     """
     Wraps a pretrained ResNet-50 and strips its classifier head.
@@ -27,12 +28,12 @@ class ImageEncoder(nn.Module):
     def __init__(self, frozen: bool = cfg.encoder_frozen):
         super().__init__()
 
-        # ── Load pretrained ResNet-50 ──────────────────────────
+        # Load pretrained ResNet-50
         # weights="IMAGENET1K_V2" = best available ResNet-50 weights
         backbone = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
         print(f"[Encoder] Loaded pretrained ResNet-50")
 
-        # ── Remove the final FC classification layer ───────────
+        # Remove the final FC classification layer, because it was built for 1000 image classes, but here we want the 2048-dim feature vector before that layer.
         # ResNet architecture: conv layers → avgpool → fc(2048→1000)
         # We want the 2048-dim vector BEFORE the fc layer
         # nn.Sequential(*list(...)[:-1]) keeps everything except the last layer
@@ -41,11 +42,11 @@ class ImageEncoder(nn.Module):
 
         # ── Freeze CNN weights ─────────────────────────────────
         if frozen:
-            for param in self.feature_extractor.parameters():
+            for param in self.feature_extractor.parameters():               # frozen = true always in the config, so this loop will always run and will freeze all the parameters by setting requires_grad to False.
                 param.requires_grad = False
             print(f"[Encoder] CNN weights FROZEN — will not be updated during training")
         else:
-            print(f"[Encoder] CNN weights TRAINABLE — will be fine-tuned")
+            print(f"[Encoder] CNN weights TRAINABLE — will be fine-tuned")   # never set to False in this project.
 
         self.out_dim = cfg.encoder_out_dim   # 2048
         self.frozen  = frozen
@@ -53,26 +54,24 @@ class ImageEncoder(nn.Module):
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            images: (batch, 3, 224, 224)  — normalized image tensors
+            images: (batch, 3, 224, 224)  — normalized image tensors  (3-RGB, 224*224 = height and width)
 
         Returns:
             features: (batch, 2048)       — flat visual feature vectors
         """
         # Pass through all conv layers + avgpool
-        features = self.feature_extractor(images)
+        features = self.feature_extractor(images)  # self.feature_extractor = ResNet layers
         # Shape: (batch, 2048, 1, 1)
 
         # Flatten the spatial dimensions → (batch, 2048)
-        features = features.squeeze(-1).squeeze(-1)
+        features = features.squeeze(-1).squeeze(-1)   # (batch, 2048,1,1) -> (batch, 2048) by removing the last two dimensions of size 1.
 
         return features
 
 
-# =============================================================
 #  Image preprocessing pipeline
 #  All images must be resized and normalized before the CNN
 #  These exact mean/std values match ImageNet training statistics
-# =============================================================
 
 def get_image_transform():
     """
@@ -89,15 +88,12 @@ def get_image_transform():
     ])
 
 
-# =============================================================
 #  Quick test — run this file directly to verify encoder works
-#  python encoder.py
-# =============================================================
 
 if __name__ == "__main__":
     import torch
 
-    print("\n=== Testing ImageEncoder ===")
+    print("\n Testing ImageEncoder")
     encoder = ImageEncoder(frozen=True).to(cfg.device)
 
     # Create a fake batch of 4 images: (batch=4, channels=3, H=224, W=224)
