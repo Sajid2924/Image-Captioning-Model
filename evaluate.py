@@ -11,7 +11,7 @@
 #  Run:
 #    python evaluate.py
 # =============================================================
-
+import json
 import os
 import random
 import math
@@ -44,7 +44,7 @@ for resource in ['punkt', 'wordnet', 'punkt_tab', 'omw-1.4']:
 
 CHECKPOINT  = "./checkpoints/best_model.pt"   # model weights to evaluate
 DATA_DIR    = "./data"                         # where Flickr8k lives
-VAL_SPLIT   = 0.10                            # must match dataset.py (10%)
+VAL_SPLIT   = 0.05                            # must match dataset.py (10%)
 NUM_IMAGES  = None                            # None = all val images, or set e.g. 100 for quick test
 DEVICE      = cfg.device
 
@@ -53,40 +53,81 @@ DEVICE      = cfg.device
 #  Uses same seed=42 shuffle as dataset.py for consistent split
 # ─────────────────────────────────────────────────────────────
 
+# def load_flickr8k_val():
+#     """
+#     Returns dict: {image_path: [ref_caption_1, ref_caption_2, ...]}
+#     Only the val split (last 10%) of Flickr8k.
+#     """
+#     captions_file     = os.path.join(DATA_DIR, "captions.txt")
+#     image_dir         = os.path.join(DATA_DIR, "Images")
+#     image_to_captions = defaultdict(list)
+#     all_images        = []
+
+#     with open(captions_file, "r", encoding="utf-8") as f:
+#         for line_num, line in enumerate(f):
+#             line = line.strip()
+#             if not line or line_num == 0:
+#                 continue
+#             parts = line.split(",", 1)
+#             if len(parts) != 2:
+#                 continue
+#             image_name, caption = parts
+#             image_path = os.path.join(image_dir, image_name.strip())
+#             if os.path.exists(image_path):
+#                 if image_path not in image_to_captions:
+#                     all_images.append(image_path)
+#                 image_to_captions[image_path].append(caption.strip())
+
+#     # Same seed=42 shuffle as dataset.py → consistent val split
+#     random.seed(42)
+#     random.shuffle(all_images)
+
+#     split_idx  = int(len(all_images) * (1 - VAL_SPLIT))
+#     val_images = all_images[split_idx:]
+
+#     return {img: image_to_captions[img] for img in val_images}
+
 def load_flickr8k_val():
     """
-    Returns dict: {image_path: [ref_caption_1, ref_caption_2, ...]}
-    Only the val split (last 10%) of Flickr8k.
+    Returns 5% of COCO 2017 val images with their captions.
+    {image_path: [ref_caption_1, ref_caption_2, ...]}
     """
-    captions_file     = os.path.join(DATA_DIR, "captions.txt")
-    image_dir         = os.path.join(DATA_DIR, "Images")
+    json_path = os.path.join(DATA_DIR, "annotations_trainval2017", "captions_val2017.json")
+    image_dir = os.path.join(DATA_DIR, "val2017")
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # Build image_id → filename mapping
+    id_to_filename = {img["id"]: img["file_name"] for img in data["images"]}
+
+    # Group captions by image
     image_to_captions = defaultdict(list)
     all_images        = []
 
-    with open(captions_file, "r", encoding="utf-8") as f:
-        for line_num, line in enumerate(f):
-            line = line.strip()
-            if not line or line_num == 0:
-                continue
-            parts = line.split(",", 1)
-            if len(parts) != 2:
-                continue
-            image_name, caption = parts
-            image_path = os.path.join(image_dir, image_name.strip())
-            if os.path.exists(image_path):
-                if image_path not in image_to_captions:
-                    all_images.append(image_path)
-                image_to_captions[image_path].append(caption.strip())
+    for ann in data["annotations"]:
+        image_id  = ann["image_id"]
+        caption   = ann["caption"].strip()
+        if image_id not in id_to_filename:
+            continue
+        image_path = os.path.join(image_dir, id_to_filename[image_id])
+        if os.path.exists(image_path):
+            if image_path not in image_to_captions:
+                all_images.append(image_path)
+            image_to_captions[image_path].append(caption)
 
-    # Same seed=42 shuffle as dataset.py → consistent val split
+    # Shuffle with fixed seed → reproducible
     random.seed(42)
     random.shuffle(all_images)
 
-    split_idx  = int(len(all_images) * (1 - VAL_SPLIT))
-    val_images = all_images[split_idx:]
+    # Take only 5%
+    split_idx  = int(len(all_images) * VAL_SPLIT)
+    val_images = all_images[:split_idx]
+
+    print(f"[Eval] COCO 2017 total images: {len(all_images):,}")
+    print(f"[Eval] Using 5% = {len(val_images):,} images")
 
     return {img: image_to_captions[img] for img in val_images}
-
 
 # ─────────────────────────────────────────────────────────────
 #  Load model from checkpoint
