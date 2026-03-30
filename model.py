@@ -163,7 +163,8 @@ class ImageCaptioningModel(nn.Module):
 
             # Sample next token
             probs = torch.softmax(next_logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)   # (1, 1)
+            # next_token = torch.multinomial(probs, num_samples=1)   # (1, 1)
+            next_token = torch.argmax(probs, dim=-1, keepdim=True)
 
             # Append to generated sequence
             generated = torch.cat([generated, next_token], dim=1)

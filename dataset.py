@@ -1,90 +1,165 @@
 # =============================================================
-#  dataset.py  —  Flickr8k Dataset Loader
+#  dataset.py  —  Combined Dataset Loader
 #
-#  Flickr8k structure:
-#    data/
-#      Images/          ← all .jpg images
-#      captions.txt     ← format: "image.jpg,caption text here"
+#  Loads from 3 sources and combines them:
+#    1. Flickr8k  → data/Images/ + data/captions.txt
+#    2. COCO 2014 → data/train2014/ + data/annotations_trainval2014/captions_train2014.json
+#    3. COCO 2017 → data/val2017/   + data/annotations_trainval2017/captions_val2017.json
 #
-#  What this file does:
-#    1. Parses captions.txt to get (image_path, caption) pairs
-#    2. Tokenizes captions with GPT-2 tokenizer
-#    3. Returns tensors ready for the model
+#  Total pairs: ~40k (Flickr) + ~590k (COCO2014) + ~25k (COCO2017) = ~655k pairs
+#
+#  Only dataset.py changed — everything else untouched.
 # =============================================================
 
 import os
-import pandas as pd
+import json
+import random
 from PIL import Image
 import torch
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader
 from transformers import GPT2Tokenizer
 
 from encoder import get_image_transform
 from config import cfg
 
 
-# ─────────────────────────────────────────────────────────────
-#  Dataset class
-# ─────────────────────────────────────────────────────────────
-
-class Flickr8kDataset(Dataset):
+class CombinedCaptionDataset(Dataset):
     """
+    Combines Flickr8k + COCO 2014 train + COCO 2017 val into one dataset.
+
     Each item returns:
-        image    : (3, 224, 224) normalized image tensor
-        input_ids: (max_caption_len,) token IDs for the caption
-        labels   : (max_caption_len,) same as input_ids but with
-                   padding positions set to -100 (ignored by loss)
+        image     : (3, 224, 224) normalized image tensor
+        input_ids : (max_caption_len,) token IDs
+        labels    : (max_caption_len,) same but -100 at padding
+        attn_mask : (max_caption_len,) 1=real token, 0=padding
     """
 
-    def __init__(self, data_dir: str, captions_file: str, split: str = "train"):
-        self.image_dir = os.path.join(data_dir, "Images")
+    def __init__(self, data_dir: str, split: str = "train"):
         self.transform = get_image_transform()
-
-        # ── Load GPT-2 tokenizer ───────────────────────────────
-        # The tokenizer converts text to token IDs
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-        # GPT-2 has no pad token by default — use EOS token as pad
         self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.pad_id  = self.tokenizer.eos_token_id
         self.max_len = cfg.max_caption_len
 
-        # ── Parse captions file ───────────────────────────────
-        print(f"[Dataset] Loading captions from {captions_file}")
-        pairs = self._load_captions(captions_file)
+        all_pairs = []
+
+        # ── Source 1: Flickr8k ────────────────────────────────
+        flickr_pairs = self._load_flickr8k(data_dir)
+        print(f"[Dataset] Flickr8k pairs:    {len(flickr_pairs):,}")
+        all_pairs.extend(flickr_pairs)
+
+        # ── Source 2: COCO 2014 train ─────────────────────────
+        coco2014_json = os.path.join(
+            data_dir, "annotations_trainval2014", "captions_train2014.json"
+        )
+        coco2014_img_dir = os.path.join(data_dir, "train2014")
+        if os.path.exists(coco2014_json) and os.path.exists(coco2014_img_dir):
+            coco2014_pairs = self._load_coco_json(coco2014_json, coco2014_img_dir)
+            print(f"[Dataset] COCO 2014 train pairs: {len(coco2014_pairs):,}")
+            all_pairs.extend(coco2014_pairs)
+        else:
+            print(f"[Dataset] COCO 2014 not found — skipping")
+
+        # ── Source 3: COCO 2017 val ───────────────────────────
+        coco2017_json = os.path.join(
+            data_dir, "annotations_trainval2017", "captions_val2017.json"
+        )
+        coco2017_img_dir = os.path.join(data_dir, "val2017")
+        if os.path.exists(coco2017_json) and os.path.exists(coco2017_img_dir):
+            coco2017_pairs = self._load_coco_json(coco2017_json, coco2017_img_dir)
+            print(f"[Dataset] COCO 2017 val pairs:   {len(coco2017_pairs):,}")
+            all_pairs.extend(coco2017_pairs)
+        else:
+            print(f"[Dataset] COCO 2017 not found — skipping")
+
+        # ── Shuffle before split so all 3 sources appear in both train and val
+        # seed=42 ensures same split every run — reproducible
+        random.seed(42)
+        random.shuffle(all_pairs)
+
+        print(f"[Dataset] Total pairs combined:  {len(all_pairs):,}")
 
         # ── Train / Val split ─────────────────────────────────
-        split_idx = int(len(pairs) * cfg.train_split)
+        split_idx = int(len(all_pairs) * cfg.train_split)
         if split == "train":
-            self.pairs = pairs[:split_idx]
+            self.pairs = all_pairs[:split_idx]
         else:
-            self.pairs = pairs[split_idx:]
+            self.pairs = all_pairs[split_idx:]
 
-        print(f"[Dataset] {split} set: {len(self.pairs)} image-caption pairs")
+        print(f"[Dataset] {split} set: {len(self.pairs):,} pairs")
 
-    def _load_captions(self, captions_file: str):
+    # ─────────────────────────────────────────────────────────
+    #  Flickr8k loader
+    # ─────────────────────────────────────────────────────────
+
+    def _load_flickr8k(self, data_dir: str):
         """
-        Parses captions.txt
-        Expected format (Flickr8k):
-            image1.jpg,A dog runs across a field.
-            image1.jpg,A brown dog plays outside.
-            ...
-        Returns list of (image_filename, caption_text) tuples
+        Loads from data/captions.txt + data/Images/
+        Format: image.jpg,caption text
         """
+        captions_file = os.path.join(data_dir, "captions.txt")
+        image_dir     = os.path.join(data_dir, "Images")
+
+        if not os.path.exists(captions_file):
+            print(f"[Dataset] Flickr8k captions.txt not found — skipping")
+            return []
+
         pairs = []
         with open(captions_file, "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f):
                 line = line.strip()
-                if not line or line_num == 0:   # skip empty lines / header
+                if not line or line_num == 0:
                     continue
-                # Split only on first comma
                 parts = line.split(",", 1)
                 if len(parts) != 2:
                     continue
                 image_name, caption = parts
-                image_path = os.path.join(self.image_dir, image_name.strip())
+                image_path = os.path.join(image_dir, image_name.strip())
                 if os.path.exists(image_path):
                     pairs.append((image_path, caption.strip()))
         return pairs
+
+    # ─────────────────────────────────────────────────────────
+    #  COCO JSON loader (works for both 2014 and 2017)
+    # ─────────────────────────────────────────────────────────
+
+    def _load_coco_json(self, json_path: str, image_dir: str):
+        """
+        Loads COCO caption JSON.
+
+        JSON structure:
+          {
+            "images":      [{"id": 123, "file_name": "COCO_train2014_...jpg"}, ...]
+            "annotations": [{"image_id": 123, "caption": "A dog..."}, ...]
+          }
+        """
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Build image_id → file_name mapping
+        id_to_filename = {}
+        for img in data["images"]:
+            id_to_filename[img["id"]] = img["file_name"]
+
+        # Build (image_path, caption) pairs
+        pairs = []
+        for ann in data["annotations"]:
+            image_id = ann["image_id"]
+            caption  = ann["caption"].strip()
+
+            if image_id not in id_to_filename:
+                continue
+
+            filename   = id_to_filename[image_id]
+            image_path = os.path.join(image_dir, filename)
+
+            if os.path.exists(image_path):
+                pairs.append((image_path, caption))
+
+        return pairs
+
+    # ─────────────────────────────────────────────────────────
+    #  Dataset interface
+    # ─────────────────────────────────────────────────────────
 
     def __len__(self):
         return len(self.pairs)
@@ -97,57 +172,54 @@ class Flickr8kDataset(Dataset):
         image = self.transform(image)    # (3, 224, 224)
 
         # ── Tokenize caption ──────────────────────────────────
-        # Add EOS at the end so the model learns when to stop
         caption_with_eos = caption_text + self.tokenizer.eos_token
 
         encoding = self.tokenizer(
             caption_with_eos,
-            max_length    = self.max_len,
-            padding       = "max_length",   # pad shorter sequences
-            truncation    = True,           # truncate longer sequences
+            max_length     = self.max_len,
+            padding        = "max_length",
+            truncation     = True,
             return_tensors = "pt",
         )
-        input_ids = encoding["input_ids"].squeeze(0)        # (max_len,)
-        attn_mask = encoding["attention_mask"].squeeze(0)   # (max_len,) 1=real, 0=pad
+        input_ids = encoding["input_ids"].squeeze(0)
+        attn_mask = encoding["attention_mask"].squeeze(0)
 
-        # ── Labels for cross-entropy loss ─────────────────────
-        # Same as input_ids but padding positions → -100
-        # PyTorch's CrossEntropyLoss ignores positions with label -100
         labels = input_ids.clone()
-        labels[attn_mask == 0] = -100    # mask padding from loss
+        labels[attn_mask == 0] = -100
 
         return {
-            "image"     : image,        # (3, 224, 224)
-            "input_ids" : input_ids,    # (max_len,)
-            "labels"    : labels,       # (max_len,)  -100 at pad positions
-            "attn_mask" : attn_mask,    # (max_len,)
+            "image"     : image,
+            "input_ids" : input_ids,
+            "labels"    : labels,
+            "attn_mask" : attn_mask,
         }
 
 
 # ─────────────────────────────────────────────────────────────
-#  DataLoader factory
+#  DataLoader factory — called by train.py
 # ─────────────────────────────────────────────────────────────
 
 def get_dataloaders(data_dir: str = cfg.data_dir,
-                   captions_file: str = cfg.captions_file):
+                    captions_file: str = cfg.captions_file):
     """
-    Returns (train_loader, val_loader) ready for training.
+    Returns (train_loader, val_loader) using combined dataset.
+    captions_file param kept for backward compatibility — not used here.
     """
-    train_dataset = Flickr8kDataset(data_dir, captions_file, split="train")
-    val_dataset   = Flickr8kDataset(data_dir, captions_file, split="val")
+    train_dataset = CombinedCaptionDataset(data_dir, split="train")
+    val_dataset   = CombinedCaptionDataset(data_dir, split="val")
 
     train_loader = DataLoader(
         train_dataset,
         batch_size  = cfg.batch_size,
         shuffle     = True,
-        num_workers = 2,           # parallel data loading
-        pin_memory  = True,        # faster GPU transfer
+        num_workers = 4,        # increase for large dataset
+        pin_memory  = True,
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size  = cfg.batch_size,
         shuffle     = False,
-        num_workers = 2,
+        num_workers = 4,
         pin_memory  = True,
     )
 
@@ -159,25 +231,18 @@ def get_dataloaders(data_dir: str = cfg.data_dir,
 # ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("\n=== Testing Dataset ===\n")
+    print("\n=== Testing Combined Dataset ===\n")
 
-    # This will only work after you download Flickr8k into ./data/
-    try:
-        train_loader, val_loader = get_dataloaders()
-        batch = next(iter(train_loader))
+    train_loader, val_loader = get_dataloaders()
+    batch = next(iter(train_loader))
 
-        print(f"Batch keys:      {list(batch.keys())}")
-        print(f"Image shape:     {batch['image'].shape}")       # (B, 3, 224, 224)
-        print(f"input_ids shape: {batch['input_ids'].shape}")   # (B, 64)
-        print(f"labels shape:    {batch['labels'].shape}")      # (B, 64)
+    print(f"\nBatch keys:      {list(batch.keys())}")
+    print(f"Image shape:     {batch['image'].shape}")
+    print(f"input_ids shape: {batch['input_ids'].shape}")
+    print(f"labels shape:    {batch['labels'].shape}")
 
-        # Decode one caption back to text to verify tokenization
-        from transformers import GPT2Tokenizer
-        tok = GPT2Tokenizer.from_pretrained("gpt2")
-        ids = batch["input_ids"][0]
-        ids = ids[ids != tok.eos_token_id]   # remove padding
-        print(f"\nSample caption: {tok.decode(ids)}")
-
-    except FileNotFoundError:
-        print("Dataset not found. Please download Flickr8k to ./data/")
-        print("Download from: https://www.kaggle.com/datasets/adityajn105/flickr8k")
+    from transformers import GPT2Tokenizer
+    tok = GPT2Tokenizer.from_pretrained("gpt2")
+    ids = batch["input_ids"][0]
+    ids = ids[ids != tok.eos_token_id]
+    print(f"\nSample caption:  {tok.decode(ids)}")

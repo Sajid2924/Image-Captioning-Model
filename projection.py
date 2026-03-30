@@ -53,6 +53,7 @@ class ProjectionLayer(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(encoder_dim, hidden_dim),
             nn.Tanh(),                                # smooth non-linearity
+            nn.Dropout(0.3),
             nn.Linear(hidden_dim, out_size),
         )
 

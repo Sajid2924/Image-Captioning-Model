@@ -18,7 +18,7 @@ class Config:
 
     # ── CNN Encoder ───────────────────────────────────────────
     encoder_model   = "resnet50"         # resnet50 | efficientnet_b0
-    encoder_frozen  = True               # freeze CNN weights (saves VRAM)
+    encoder_frozen  = False               # freeze CNN weights (saves VRAM)
     encoder_out_dim = 2048               # ResNet50 final feature size
 
     # ── GPT-2 ─────────────────────────────────────────────────
@@ -36,12 +36,16 @@ class Config:
 
     # ── Training ──────────────────────────────────────────────
     batch_size      = 16                # lower to 8 if you get OOM errors
-    num_epochs      = 15
-    learning_rate   = 2e-4
-    weight_decay    = 1e-4
-    warmup_steps    = 200
+    num_epochs      = 50
+    learning_rate   = 3e-5
+    weight_decay    = 1e-3
+    warmup_steps    = 1000
     grad_clip       = 1.0               # gradient clipping value
     mixed_precision = True              # use float16 — saves ~40% VRAM
+
+    # ── Early Stopping ────────────────────────────────────────
+    early_stopping_patience  = 3
+    early_stopping_min_delta = 0.001
 
     # ── Checkpointing ─────────────────────────────────────────
     checkpoint_dir  = "./checkpoints"
@@ -49,11 +53,11 @@ class Config:
     resume_from     = None              # path to checkpoint to resume from
 
     # ── Logging ───────────────────────────────────────────────
-    log_every       = 50               # print loss every N steps
+    log_every       = 500               # print loss every N steps
 
     # ── Inference ─────────────────────────────────────────────
     max_gen_len     = 30               # max tokens to generate
-    temperature     = 1.0
+    temperature     = 0.7
     top_k           = 50
 
 

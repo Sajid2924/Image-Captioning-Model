@@ -19,8 +19,8 @@ from config  import cfg
 
 
 # ── Defaults — just drop image.jpg in your project folder ─────
-DEFAULT_IMAGE      = "./image.jpg"
-DEFAULT_CHECKPOINT = "./checkpoints/sample_best_model.pt"
+DEFAULT_IMAGE      = "./image_dog_water.jpg"
+DEFAULT_CHECKPOINT = "./checkpoints/best_model.pt"
 
 
 def load_model(checkpoint_path: str):
