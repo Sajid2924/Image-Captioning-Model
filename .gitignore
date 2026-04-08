@@ -18,3 +18,5 @@ __pycache__/
 # Optional: OS files
 .DS_Store
 Thumbs.db
+
+tp.py
