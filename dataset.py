@@ -1,15 +1,13 @@
-# =============================================================
-#  dataset.py  —  Combined Dataset Loader
+# dataset.py  —  Combined Dataset Loader
 #
-#  Loads from 3 sources and combines them:
-#    1. Flickr8k  → data/Images/ + data/captions.txt
-#    2. COCO 2014 → data/train2014/ + data/annotations_trainval2014/captions_train2014.json
-#    3. COCO 2017 → data/val2017/   + data/annotations_trainval2017/captions_val2017.json
+# Loads from 3 sources and combines them:
+#  1. Flickr8k  → data/Images/ + data/captions.txt
+#  2. COCO 2014 → data/train2014/ + data/annotations_trainval2014/captions_train2014.json
+#  3. COCO 2017 → data/val2017/   + data/annotations_trainval2017/captions_val2017.json
 #
-#  Total pairs: ~40k (Flickr) + ~590k (COCO2014) + ~25k (COCO2017) = ~655k pairs
+# Total pairs: ~40k (Flickr) + ~590k (COCO2014) + ~25k (COCO2017) = ~655k pairs
 #
-#  Only dataset.py changed — everything else untouched.
-# =============================================================
+# Only dataset.py changed — everything else untouched.
 
 import os
 import json
@@ -32,6 +30,7 @@ class CombinedCaptionDataset(Dataset):
         input_ids : (max_caption_len,) token IDs
         labels    : (max_caption_len,) same but -100 at padding
         attn_mask : (max_caption_len,) 1=real token, 0=padding
+
     """
 
     def __init__(self, data_dir: str, split: str = "train"):
@@ -42,12 +41,12 @@ class CombinedCaptionDataset(Dataset):
 
         all_pairs = []
 
-        # ── Source 1: Flickr8k ────────────────────────────────
+        # Source 1: Flickr8k
         flickr_pairs = self._load_flickr8k(data_dir)
         print(f"[Dataset] Flickr8k pairs:    {len(flickr_pairs):,}")
         all_pairs.extend(flickr_pairs)
 
-        # ── Source 2: COCO 2014 train ─────────────────────────
+        # Source 2: COCO 2014 train
         coco2014_json = os.path.join(
             data_dir, "annotations_trainval2014", "captions_train2014.json"
         )
@@ -59,7 +58,7 @@ class CombinedCaptionDataset(Dataset):
         else:
             print(f"[Dataset] COCO 2014 not found — skipping")
 
-        # ── Source 3: COCO 2017 val ───────────────────────────
+        # Source 3: COCO 2017 val
         coco2017_json = os.path.join(
             data_dir, "annotations_trainval2017", "captions_val2017.json"
         )
@@ -71,14 +70,14 @@ class CombinedCaptionDataset(Dataset):
         else:
             print(f"[Dataset] COCO 2017 not found — skipping")
 
-        # ── Shuffle before split so all 3 sources appear in both train and val
+        # Shuffle before split so all 3 sources appear in both train and val
         # seed=42 ensures same split every run — reproducible
         random.seed(42)
         random.shuffle(all_pairs)
 
         print(f"[Dataset] Total pairs combined:  {len(all_pairs):,}")
 
-        # ── Train / Val split ─────────────────────────────────
+        # Train / Val split
         split_idx = int(len(all_pairs) * cfg.train_split)
         if split == "train":
             self.pairs = all_pairs[:split_idx]
@@ -87,17 +86,14 @@ class CombinedCaptionDataset(Dataset):
 
         print(f"[Dataset] {split} set: {len(self.pairs):,} pairs")
 
-    # ─────────────────────────────────────────────────────────
-    #  Flickr8k loader
-    # ─────────────────────────────────────────────────────────
-
+    # Flickr8k loader
     def _load_flickr8k(self, data_dir: str):
         """
         Loads from data/captions.txt + data/Images/
         Format: image.jpg,caption text
         """
         captions_file = os.path.join(data_dir, "captions.txt")
-        image_dir     = os.path.join(data_dir, "Images")
+        image_dir = os.path.join(data_dir, "Images")
 
         if not os.path.exists(captions_file):
             print(f"[Dataset] Flickr8k captions.txt not found — skipping")
@@ -118,10 +114,7 @@ class CombinedCaptionDataset(Dataset):
                     pairs.append((image_path, caption.strip()))
         return pairs
 
-    # ─────────────────────────────────────────────────────────
-    #  COCO JSON loader (works for both 2014 and 2017)
-    # ─────────────────────────────────────────────────────────
-
+    # COCO JSON loader (works for both 2014 and 2017)
     def _load_coco_json(self, json_path: str, image_dir: str):
         """
         Loads COCO caption JSON.
@@ -144,12 +137,12 @@ class CombinedCaptionDataset(Dataset):
         pairs = []
         for ann in data["annotations"]:
             image_id = ann["image_id"]
-            caption  = ann["caption"].strip()
+            caption = ann["caption"].strip()
 
             if image_id not in id_to_filename:
                 continue
 
-            filename   = id_to_filename[image_id]
+            filename = id_to_filename[image_id]
             image_path = os.path.join(image_dir, filename)
 
             if os.path.exists(image_path):
@@ -157,9 +150,7 @@ class CombinedCaptionDataset(Dataset):
 
         return pairs
 
-    # ─────────────────────────────────────────────────────────
-    #  Dataset interface
-    # ─────────────────────────────────────────────────────────
+    # Dataset interface
 
     def __len__(self):
         return len(self.pairs)
@@ -167,19 +158,19 @@ class CombinedCaptionDataset(Dataset):
     def __getitem__(self, idx):
         image_path, caption_text = self.pairs[idx]
 
-        # ── Load and transform image ───────────────────────────
+        # Load and transform image
         image = Image.open(image_path).convert("RGB")
-        image = self.transform(image)    # (3, 224, 224)
+        image = self.transform(image)  # (3, 224, 224)
 
-        # ── Tokenize caption ──────────────────────────────────
+        # Tokenize caption
         caption_with_eos = caption_text + self.tokenizer.eos_token
 
         encoding = self.tokenizer(
             caption_with_eos,
-            max_length     = self.max_len,
-            padding        = "max_length",
-            truncation     = True,
-            return_tensors = "pt",
+            max_length=self.max_len,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
         )
         input_ids = encoding["input_ids"].squeeze(0)
         attn_mask = encoding["attention_mask"].squeeze(0)
@@ -188,48 +179,43 @@ class CombinedCaptionDataset(Dataset):
         labels[attn_mask == 0] = -100
 
         return {
-            "image"     : image,
-            "input_ids" : input_ids,
-            "labels"    : labels,
-            "attn_mask" : attn_mask,
+            "image": image,
+            "input_ids": input_ids,
+            "labels": labels,
+            "attn_mask": attn_mask,
         }
 
 
-# ─────────────────────────────────────────────────────────────
-#  DataLoader factory — called by train.py
-# ─────────────────────────────────────────────────────────────
-
-def get_dataloaders(data_dir: str = cfg.data_dir,
-                    captions_file: str = cfg.captions_file):
+# DataLoader factory — called by train.py
+def get_dataloaders(
+    data_dir: str = cfg.data_dir, captions_file: str = cfg.captions_file
+):
     """
     Returns (train_loader, val_loader) using combined dataset.
     captions_file param kept for backward compatibility — not used here.
     """
     train_dataset = CombinedCaptionDataset(data_dir, split="train")
-    val_dataset   = CombinedCaptionDataset(data_dir, split="val")
+    val_dataset = CombinedCaptionDataset(data_dir, split="val")
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size  = cfg.batch_size,
-        shuffle     = True,
-        num_workers = 4,        # increase for large dataset
-        pin_memory  = True,
+        batch_size=cfg.batch_size,
+        shuffle=True,
+        num_workers=4,  # increase for large dataset
+        pin_memory=True,
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size  = cfg.batch_size,
-        shuffle     = False,
-        num_workers = 4,
-        pin_memory  = True,
+        batch_size=cfg.batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True,
     )
 
     return train_loader, val_loader
 
 
-# ─────────────────────────────────────────────────────────────
-#  Quick test — python dataset.py
-# ─────────────────────────────────────────────────────────────
-
+# Quick test — python dataset.py
 if __name__ == "__main__":
     print("\n=== Testing Combined Dataset ===\n")
 
@@ -242,6 +228,7 @@ if __name__ == "__main__":
     print(f"labels shape:    {batch['labels'].shape}")
 
     from transformers import GPT2Tokenizer
+
     tok = GPT2Tokenizer.from_pretrained("gpt2")
     ids = batch["input_ids"][0]
     ids = ids[ids != tok.eos_token_id]

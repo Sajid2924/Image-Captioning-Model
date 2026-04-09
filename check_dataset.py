@@ -1,14 +1,11 @@
-# =============================================================
-#  check_dataset.py  —  Verify captions from all 3 sources
+# check_dataset.py  —  Verify captions from all 3 sources
 #
-#  Prints first 2 image paths + captions from:
-#    1. Flickr8k
-#    2. COCO 2014
-#    3. COCO 2017
+# Prints first 2 image paths + captions from:
+#  1. Flickr8k
+#  2. COCO 2014
+#  3. COCO 2017
 #
-#  Run: python check_dataset.py
-# =============================================================
-
+# Run: python check_dataset.py
 import os
 import json
 from config import cfg
@@ -17,12 +14,12 @@ DATA_DIR = cfg.data_dir
 
 
 def check_flickr8k():
-    print("\n" + "="*55)
+    print("\n" + "=" * 55)
     print("  SOURCE 1 — Flickr8k")
-    print("="*55)
+    print("=" * 55)
 
     captions_file = os.path.join(DATA_DIR, "captions.txt")
-    image_dir     = os.path.join(DATA_DIR, "Images")
+    image_dir = os.path.join(DATA_DIR, "Images")
 
     if not os.path.exists(captions_file):
         print("  ❌ captions.txt not found")
@@ -53,9 +50,9 @@ def check_flickr8k():
 
 
 def check_coco(json_path, image_dir, label):
-    print("\n" + "="*55)
+    print("\n" + "=" * 55)
     print(f"  SOURCE {label}")
-    print("="*55)
+    print("=" * 55)
 
     if not os.path.exists(json_path):
         print(f"  ❌ JSON not found: {json_path}")
@@ -72,12 +69,12 @@ def check_coco(json_path, image_dir, label):
     count = 0
     for ann in data["annotations"]:
         image_id = ann["image_id"]
-        caption  = ann["caption"].strip()
+        caption = ann["caption"].strip()
 
         if image_id not in id_to_filename:
             continue
 
-        filename   = id_to_filename[image_id]
+        filename = id_to_filename[image_id]
         image_path = os.path.join(image_dir, filename)
 
         if os.path.exists(image_path):
@@ -101,18 +98,22 @@ if __name__ == "__main__":
 
     # COCO 2014
     check_coco(
-        json_path  = os.path.join(DATA_DIR, "annotations_trainval2014", "captions_train2014.json"),
-        image_dir  = os.path.join(DATA_DIR, "train2014"),
-        label      = "2 — COCO 2014 train"
+        json_path=os.path.join(
+            DATA_DIR, "annotations_trainval2014", "captions_train2014.json"
+        ),
+        image_dir=os.path.join(DATA_DIR, "train2014"),
+        label="2 — COCO 2014 train",
     )
 
     # COCO 2017
     check_coco(
-        json_path  = os.path.join(DATA_DIR, "annotations_trainval2017", "captions_val2017.json"),
-        image_dir  = os.path.join(DATA_DIR, "val2017"),
-        label      = "3 — COCO 2017 val"
+        json_path=os.path.join(
+            DATA_DIR, "annotations_trainval2017", "captions_val2017.json"
+        ),
+        image_dir=os.path.join(DATA_DIR, "val2017"),
+        label="3 — COCO 2017 val",
     )
 
-    print("\n" + "="*55)
+    print("\n" + "=" * 55)
     print("  Done! All sources checked.")
-    print("="*55 + "\n")
+    print("=" * 55 + "\n")

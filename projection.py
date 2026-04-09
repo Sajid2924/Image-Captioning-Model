@@ -1,22 +1,20 @@
-# =============================================================
-#  projection.py  —  Image Feature → GPT-2 Prefix Mapper
+# projection.py  —  Image Feature → GPT-2 Prefix Mapper
 #
-#  What this does:
-#    Takes the 2048-dim CNN feature vector and maps it to
-#    `prefix_length` tokens of size 768 (GPT-2 embedding size).
+# What this does:
+#  Takes the 2048-dim CNN feature vector and maps it to
+#  `prefix_length` tokens of size 768 (GPT-2 embedding size).
 #
-#    These prefix tokens are prepended to the caption tokens
-#    before the GPT-2 transformer, acting as a "visual prompt"
-#    that conditions the language model on the image.
+#  These prefix tokens are prepended to the caption tokens
+#  before the GPT-2 transformer, acting as a "visual prompt"
+#  that conditions the language model on the image.
 #
-#  Architecture:
-#    Linear(2048 → prefix_length * 768)
-#    → Reshape to (batch, prefix_length, 768)
+# Architecture:
+#  Linear(2048 → prefix_length * 768)
+#  → Reshape to (batch, prefix_length, 768)
 #
-#  This is the ONLY trainable part if CNN is frozen.
-#  It's a small module (~20M params) that learns to translate
-#  vision features into the language model's embedding space.
-# =============================================================
+# This is the ONLY trainable part if CNN is frozen.
+# It's a small module (~20M params) that learns to translate
+# vision features into the language model's embedding space.
 
 import torch
 import torch.nn as nn
@@ -34,9 +32,9 @@ class ProjectionLayer(nn.Module):
 
     def __init__(
         self,
-        encoder_dim   : int = cfg.encoder_out_dim,   # 2048
-        gpt2_embd_dim : int = cfg.gpt2_n_embd,       # 768
-        prefix_length : int = cfg.prefix_length,     # 10
+        encoder_dim: int = cfg.encoder_out_dim,  # 2048
+        gpt2_embd_dim: int = cfg.gpt2_n_embd,  # 768
+        prefix_length: int = cfg.prefix_length,  # 10
     ):
         super().__init__()
 
@@ -48,11 +46,11 @@ class ProjectionLayer(nn.Module):
         out_size = prefix_length * gpt2_embd_dim
 
         # 2-layer MLP: encoder_dim → hidden → out_size
-        hidden_dim = (encoder_dim + out_size) // 2   # midpoint as hidden size
+        hidden_dim = (encoder_dim + out_size) // 2  # midpoint as hidden size
 
         self.net = nn.Sequential(
             nn.Linear(encoder_dim, hidden_dim),
-            nn.Tanh(),                                # smooth non-linearity
+            nn.Tanh(),  # smooth non-linearity
             nn.Dropout(0.3),
             nn.Linear(hidden_dim, out_size),
         )
@@ -79,10 +77,7 @@ class ProjectionLayer(nn.Module):
         return prefix
 
 
-# ─────────────────────────────────────────────────────────────
-#  Quick test  —  python projection.py
-# ─────────────────────────────────────────────────────────────
-
+# Quick test  —  python projection.py
 if __name__ == "__main__":
     print("\n=== Testing ProjectionLayer ===\n")
 
@@ -93,8 +88,8 @@ if __name__ == "__main__":
 
     prefix = proj(dummy_features)
 
-    print(f"\nInput:  {dummy_features.shape}")   # (4, 2048)
-    print(f"Output: {prefix.shape}")             # (4, 10, 768)
+    print(f"\nInput:  {dummy_features.shape}")  # (4, 2048)
+    print(f"Output: {prefix.shape}")  # (4, 10, 768)
     print(f"\nProjection layer works correctly!")
 
     total = sum(p.numel() for p in proj.parameters())
